@@ -12,6 +12,7 @@ import torch.nn.functional as F
 
 import models.utils
 
+
 class ConvTemplate(nn.Module):
     def __init__(self, encodingsize=256, outchannels=4, templateres=128):
         super(ConvTemplate, self).__init__()
@@ -40,6 +41,7 @@ class ConvTemplate(nn.Module):
     def forward(self, encoding):
         return self.template2(self.template1(encoding).view(-1, 1024, 1, 1, 1))
 
+
 class LinearTemplate(nn.Module):
     def __init__(self, encodingsize=256, outchannels=4, templateres=128):
         super(LinearTemplate, self).__init__()
@@ -58,6 +60,7 @@ class LinearTemplate(nn.Module):
     def forward(self, encoding):
         return self.template1(encoding).view(-1, self.outchannels, self.templateres, self.templateres, self.templateres)
 
+
 def gettemplate(templatetype, **kwargs):
     if templatetype == "conv":
         return ConvTemplate(**kwargs)
@@ -66,6 +69,7 @@ def gettemplate(templatetype, **kwargs):
     else:
         return None
 
+
 class ConvWarp(nn.Module):
     def __init__(self, displacementwarp=False, **kwargs):
         super(ConvWarp, self).__init__()
@@ -73,20 +77,25 @@ class ConvWarp(nn.Module):
         self.displacementwarp = displacementwarp
 
         self.warp1 = nn.Sequential(
-                nn.Linear(256, 1024), nn.LeakyReLU(0.2))
+            nn.Linear(256, 1024),
+            nn.LeakyReLU(0.2)
+        )
         self.warp2 = nn.Sequential(
-                nn.ConvTranspose3d(1024, 512, 4, 2, 1), nn.LeakyReLU(0.2),
-                nn.ConvTranspose3d(512, 512, 4, 2, 1), nn.LeakyReLU(0.2),
-                nn.ConvTranspose3d(512, 256, 4, 2, 1), nn.LeakyReLU(0.2),
-                nn.ConvTranspose3d(256, 256, 4, 2, 1), nn.LeakyReLU(0.2),
-                nn.ConvTranspose3d(256, 3, 4, 2, 1))
+            nn.ConvTranspose3d(1024, 512, 4, 2, 1), nn.LeakyReLU(0.2),
+            nn.ConvTranspose3d(512, 512, 4, 2, 1), nn.LeakyReLU(0.2),
+            nn.ConvTranspose3d(512, 256, 4, 2, 1), nn.LeakyReLU(0.2),
+            nn.ConvTranspose3d(256, 256, 4, 2, 1), nn.LeakyReLU(0.2),
+            nn.ConvTranspose3d(256, 3, 4, 2, 1)
+        )
+
         for m in [self.warp1, self.warp2]:
             models.utils.initseq(m)
 
         zgrid, ygrid, xgrid = np.meshgrid(
-                np.linspace(-1.0, 1.0, 32),
-                np.linspace(-1.0, 1.0, 32),
-                np.linspace(-1.0, 1.0, 32), indexing='ij')
+            np.linspace(-1.0, 1.0, 32),
+            np.linspace(-1.0, 1.0, 32),
+            np.linspace(-1.0, 1.0, 32), indexing='ij'
+        )
         self.register_buffer("grid", torch.tensor(np.stack((xgrid, ygrid, zgrid), axis=0)[None].astype(np.float32)))
 
     def forward(self, encoding):
@@ -95,40 +104,54 @@ class ConvWarp(nn.Module):
             finalwarp = finalwarp + self.grid
         return finalwarp
 
+
 class AffineMixWarp(nn.Module):
-    def __init__(self, **kwargs):
+    def __init__(self, n_affine_basis=16, res_affine=32, **kwargs):
         super(AffineMixWarp, self).__init__()
+
+        self.n_affine_basis = n_affine_basis
+        self.res_affine = res_affine
 
         self.quat = models.utils.Quaternion()
 
         self.warps = nn.Sequential(
-                nn.Linear(256, 128), nn.LeakyReLU(0.2),
-                nn.Linear(128, 3*16))
+            nn.Linear(256, 128), nn.LeakyReLU(0.2),
+            nn.Linear(128, 3 * n_affine_basis)
+        )
         self.warpr = nn.Sequential(
-                nn.Linear(256, 128), nn.LeakyReLU(0.2),
-                nn.Linear(128, 4*16))
+            nn.Linear(256, 128), nn.LeakyReLU(0.2),
+            nn.Linear(128, 4 * n_affine_basis)
+        )
+
         self.warpt = nn.Sequential(
-                nn.Linear(256, 128), nn.LeakyReLU(0.2),
-                nn.Linear(128, 3*16))
+            nn.Linear(256, 128), nn.LeakyReLU(0.2),
+            nn.Linear(128, 3 * n_affine_basis)
+        )
+
         self.weightbranch = nn.Sequential(
-                nn.Linear(256, 64), nn.LeakyReLU(0.2),
-                nn.Linear(64, 16*32*32*32))
+            nn.Linear(256, 64),
+            nn.LeakyReLU(0.2),
+            nn.Linear(64, n_affine_basis * (res_affine ** 3))
+        )
+
         for m in [self.warps, self.warpr, self.warpt, self.weightbranch]:
             models.utils.initseq(m)
 
         zgrid, ygrid, xgrid = np.meshgrid(
-                np.linspace(-1.0, 1.0, 32),
-                np.linspace(-1.0, 1.0, 32),
-                np.linspace(-1.0, 1.0, 32), indexing='ij')
+            np.linspace(-1.0, 1.0, res_affine),
+            np.linspace(-1.0, 1.0, res_affine),
+            np.linspace(-1.0, 1.0, res_affine), indexing='ij'
+        )
+
         self.register_buffer("grid", torch.tensor(np.stack((xgrid, ygrid, zgrid), axis=-1)[None].astype(np.float32)))
 
     def forward(self, encoding):
-        warps = self.warps(encoding).view(encoding.size(0), 16, 3)
-        warpr = self.warpr(encoding).view(encoding.size(0), 16, 4)
-        warpt = self.warpt(encoding).view(encoding.size(0), 16, 3) * 0.1
-        warprot = self.quat(warpr.view(-1, 4)).view(encoding.size(0), 16, 3, 3)
+        warps = self.warps(encoding).view(encoding.size(0), self.n_affine_basis, 3)
+        warpr = self.warpr(encoding).view(encoding.size(0), self.n_affine_basis, 4)
+        warpt = self.warpt(encoding).view(encoding.size(0), self.n_affine_basis, 3) * 0.1
+        warprot = self.quat(warpr.view(-1, 4)).view(encoding.size(0), self.n_affine_basis, 3, 3)
 
-        weight = torch.exp(self.weightbranch(encoding).view(encoding.size(0), 16, 32, 32, 32))
+        weight = torch.exp(self.weightbranch(encoding).view(encoding.size(0), self.n_affine_basis, self.res_affine, self.res_affine, self.res_affine))
 
         warpedweight = torch.cat([
             F.grid_sample(weight[:, i:i+1, :, :, :],
@@ -146,6 +169,7 @@ class AffineMixWarp(nn.Module):
 
         return warp.permute(0, 4, 1, 2, 3)
 
+
 def getwarp(warptype, **kwargs):
     if warptype == "conv":
         return ConvWarp(**kwargs)
@@ -154,10 +178,15 @@ def getwarp(warptype, **kwargs):
     else:
         return None
 
+
 class Decoder(nn.Module):
-    def __init__(self, templatetype="conv", templateres=128,
-            viewconditioned=False, globalwarp=True, warptype="affinemix",
-            displacementwarp=False):
+    def __init__(
+        self,
+        templatetype="conv", templateres=128,
+        viewconditioned=False, globalwarp=True,
+        warptype="affinemix", n_affine_basis=16, affine_res=32,
+        displacementwarp=False
+    ):
         super(Decoder, self).__init__()
 
         self.templatetype = templatetype
@@ -166,29 +195,38 @@ class Decoder(nn.Module):
         self.globalwarp = globalwarp
         self.warptype = warptype
         self.displacementwarp = displacementwarp
+        self.n_affine_basis = n_affine_basis
+        self.affine_res = affine_res
 
         if self.viewconditioned:
-            self.template = gettemplate(self.templatetype, encodingsize=256+3,
-                    outchannels=3, templateres=self.templateres)
-            self.templatealpha = gettemplate(self.templatetype, encodingsize=256,
-                    outchannels=1, templateres=self.templateres)
+            self.template = gettemplate(
+                self.templatetype, encodingsize=256 + 3,
+                outchannels=3, templateres=self.templateres
+            )
+            self.templatealpha = gettemplate(
+                self.templatetype, encodingsize=256,
+                outchannels=1, templateres=self.templateres
+            )
         else:
             self.template = gettemplate(self.templatetype, templateres=self.templateres)
 
-        self.warp = getwarp(self.warptype, displacementwarp=self.displacementwarp)
+        self.warp = getwarp(self.warptype, displacementwarp=self.displacementwarp, n_affine_basis=self.n_affine_basis, affine_res=self.affine_res)
 
         if self.globalwarp:
             self.quat = models.utils.Quaternion()
 
             self.gwarps = nn.Sequential(
-                    nn.Linear(256, 128), nn.LeakyReLU(0.2),
-                    nn.Linear(128, 3))
+                nn.Linear(256, 128), nn.LeakyReLU(0.2),
+                nn.Linear(128, 3)
+            )
             self.gwarpr = nn.Sequential(
-                    nn.Linear(256, 128), nn.LeakyReLU(0.2),
-                    nn.Linear(128, 4))
+                nn.Linear(256, 128), nn.LeakyReLU(0.2),
+                nn.Linear(128, 4)
+            )
             self.gwarpt = nn.Sequential(
-                    nn.Linear(256, 128), nn.LeakyReLU(0.2),
-                    nn.Linear(128, 3))
+                nn.Linear(256, 128), nn.LeakyReLU(0.2),
+                nn.Linear(128, 3)
+            )
 
             initseq = models.utils.initseq
             for m in [self.gwarps, self.gwarpr, self.gwarpt]:

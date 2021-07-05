@@ -8,6 +8,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+
 class Autoencoder(nn.Module):
     def __init__(self, dataset, encoder, decoder, volsampler, colorcal, dt, stepjitter=0.01, estimatebg=False):
         super(Autoencoder, self).__init__()
@@ -36,13 +37,16 @@ class Autoencoder(nn.Module):
         ret = super(Autoencoder, self).state_dict(destination, prefix, keep_vars)
         if not self.estimatebg:
             for k in self.bg.keys():
-                del ret[prefix+"bg."+k]
+                del ret[prefix + "bg." + k]
         return ret
 
-    def forward(self, iternum, losslist, camrot, campos, focal, princpt, pixelcoords, validinput,
-            fixedcamimage=None, encoding=None, keypoints=None, camindex=None,
-            image=None, imagevalid=None, viewtemplate=False,
-            outputlist=[]):
+    def forward(
+        self,
+        iternum, losslist, camrot, campos, focal, princpt, pixelcoords, validinput,
+        fixedcamimage=None, encoding=None, keypoints=None, camindex=None,
+        image=None, imagevalid=None, viewtemplate=False,
+        outputlist=[]
+    ):
         result = {"losses": {}}
 
         # encode input or get encoding
@@ -56,9 +60,9 @@ class Autoencoder(nn.Module):
         result["losses"].update(decout["losses"])
 
         # NHWC
-        raydir = (pixelcoords - princpt[:, None, None, :]) / focal[:, None, None, :]
-        raydir = torch.cat([raydir, torch.ones_like(raydir[:, :, :, 0:1])], dim=-1)
-        raydir = torch.sum(camrot[:, None, None, :, :] * raydir[:, :, :, :, None], dim=-2)
+        raydir = (pixelcoords - princpt[:, None, None, :]) / focal[:, None, None, :]        # raydir: NHW2
+        raydir = torch.cat([raydir, torch.ones_like(raydir[:, :, :, 0:1])], dim=-1)         # raydir: NHW3
+        raydir = torch.sum(camrot[:, None, None, :, :] * raydir[:, :, :, :, None], dim=-2)  # camrot: N1133, raydir: NHW31
         raydir = raydir / torch.sqrt(torch.sum(raydir ** 2, dim=-1, keepdim=True))
 
         # compute raymarching starting points
@@ -151,7 +155,7 @@ class Autoencoder(nn.Module):
             irgbsqerr = weight * (image - rayrgb) ** 2
 
             if "irgbsqerr" in outputlist:
-                result["irgbsqerr"] = rgbsqerr
+                result["irgbsqerr"] = irgbsqerr
 
             if "irgbmse" in losslist:
                 irgbmse = torch.sum(irgbsqerr.view(irgbsqerr.size(0), -1), dim=-1)

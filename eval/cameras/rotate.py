@@ -9,6 +9,7 @@ import numpy as np
 import torch
 import torch.utils.data
 
+
 class Dataset(torch.utils.data.Dataset):
     def __init__(self, length, period=128):
         self.length = length

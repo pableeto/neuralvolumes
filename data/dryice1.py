@@ -10,6 +10,7 @@ from PIL import Image
 
 import torch.utils.data
 
+
 def load_krt(path):
     """Load KRT file containing intrinsic and extrinsic parameters."""
     cameras = {}
@@ -32,13 +33,21 @@ def load_krt(path):
 
     return cameras
 
+
 class Dataset(torch.utils.data.Dataset):
-    def __init__(self, camerafilter, framelist, keyfilter,
-            fixedcameras=[], fixedcammean=0., fixedcamstd=1.,
-            imagemean=0., imagestd=1.,
-            worldscale=1., subsampletype=None, subsamplesize=0):
-        krtpath = "experiments/dryice1/data/KRT"
+    def __init__(
+        self,
+        camerafilter, framelist, keyfilter,
+        fixedcameras=[], fixedcammean=0., fixedcamstd=1.,
+        imagemean=0., imagestd=1.,
+        out_image_size=(334, 512),   # (width, height)
+        input_image_size=(84, 128),
+        worldscale=1., subsampletype=None, subsamplesize=0
+    ):
+        krtpath = "/experiments/NeuralVolume/experiments/dryice1/data/KRT"
         krt = load_krt(krtpath)
+
+        div_factor = 512 / out_image_size[1]
 
         # get options
         self.allcameras = sorted(list(krt.keys()))
@@ -56,14 +65,16 @@ class Dataset(torch.utils.data.Dataset):
         self.imagestd = imagestd
         self.subsampletype = subsampletype
         self.subsamplesize = subsamplesize
+        self.out_image_size = out_image_size
+        self.input_image_size = input_image_size
 
         # compute camera positions
         self.campos, self.camrot, self.focal, self.princpt = {}, {}, {}, {}
         for cam in self.cameras:
             self.campos[cam] = (-np.dot(krt[cam]['extrin'][:3, :3].T, krt[cam]['extrin'][:3, 3])).astype(np.float32)
             self.camrot[cam] = (krt[cam]['extrin'][:3, :3]).astype(np.float32)
-            self.focal[cam] = (np.diag(krt[cam]['intrin'][:2, :2]) / 4.).astype(np.float32)
-            self.princpt[cam] = (krt[cam]['intrin'][:2, 2] / 4.).astype(np.float32)
+            self.focal[cam] = (np.diag(krt[cam]['intrin'][:2, :2]) / (4 * div_factor)).astype(np.float32)
+            self.princpt[cam] = (krt[cam]['intrin'][:2, 2] / (4 * div_factor)).astype(np.float32)
 
         # transformation that places the center of the object at the origin
         transfpath = "experiments/dryice1/data/pose.txt"
@@ -76,7 +87,7 @@ class Dataset(torch.utils.data.Dataset):
             for i, cam in enumerate(self.cameras):
                 try:
                     imagepath = "experiments/dryice1/data/cam{}/bg.jpg".format(cam)
-                    image = np.asarray(Image.open(imagepath), dtype=np.uint8).transpose((2, 0, 1)).astype(np.float32)
+                    image = np.asarray(Image.resize(Image.open(imagepath), self.out_image_size), dtype=np.uint8).transpose((2, 0, 1)).astype(np.float32)
                     self.bg[cam] = image
                 except:
                     pass
@@ -90,7 +101,7 @@ class Dataset(torch.utils.data.Dataset):
                 "rot": self.camrot[k],
                 "focal": self.focal[k],
                 "princpt": self.princpt[k],
-                "size": np.array([667, 1024])}
+                "size": np.array([self.out_image_size[0], self.out_image_size[1]])}
                 for k in self.cameras}
 
     def known_background(self):
@@ -116,12 +127,10 @@ class Dataset(torch.utils.data.Dataset):
         if "fixedcamimage" in self.keyfilter:
             ninput = len(self.fixedcameras)
 
-            fixedcamimage = np.zeros((3 * ninput, 512, 334), dtype=np.float32)
+            fixedcamimage = np.zeros((3 * ninput, self.input_image_size[1], self.input_image_size[0]), dtype=np.float32)
             for i in range(ninput):
-                imagepath = (
-                        "experiments/dryice1/data/cam{}/image{:04}.jpg"
-                        .format(self.fixedcameras[i], int(frame)))
-                image = np.asarray(Image.open(imagepath), dtype=np.uint8)[::2, ::2, :].transpose((2, 0, 1)).astype(np.float32)
+                imagepath = "experiments/dryice1/data/cam{}/image{:04}.jpg".format(self.fixedcameras[i], int(frame))
+                image = np.asarray(Image.resize(Image.open(imagepath), self.input_image_size), dtype=np.uint8).transpose((2, 0, 1)).astype(np.float32)
                 if np.sum(image) == 0:
                     validinput = False
                 fixedcamimage[i*3:(i+1)*3, :, :] = image
@@ -143,10 +152,8 @@ class Dataset(torch.utils.data.Dataset):
 
             if "image" in self.keyfilter:
                 # image
-                imagepath = (
-                        "experiments/dryice1/data/cam{}/image{:04}.jpg"
-                        .format(cam, int(frame)))
-                image = np.asarray(Image.open(imagepath), dtype=np.uint8).transpose((2, 0, 1)).astype(np.float32)
+                imagepath = "experiments/dryice1/data/cam{}/image{:04}.jpg".format(cam, int(frame))
+                image = np.asarray(Image.resize(Image.open(imagepath), self.out_image_size), dtype=np.uint8).transpose((2, 0, 1)).astype(np.float32)
                 height, width = image.shape[1:3]
                 valid = np.float32(1.0) if np.sum(image) != 0 else np.float32(0.)
                 result["image"] = image

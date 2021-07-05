@@ -8,6 +8,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+
 class VolSampler(nn.Module):
     def __init__(self, displacementwarp=False):
         super(VolSampler, self).__init__()

@@ -12,6 +12,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+
 def xaviermultiplier(m, gain):
     if isinstance(m, nn.Conv1d):
         ksize = m.kernel_size[0]
@@ -59,9 +60,11 @@ def xaviermultiplier(m, gain):
 
     return std
 
+
 def xavier_uniform_(m, gain):
     std = xaviermultiplier(m, gain)
     m.weight.data.uniform_(-std * math.sqrt(3.0), std * math.sqrt(3.0))
+
 
 def initmod(m, gain=1.0, weightinitfunc=xavier_uniform_):
     validclasses = [nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d, nn.ConvTranspose1d, nn.ConvTranspose2d, nn.ConvTranspose3d]
@@ -87,6 +90,7 @@ def initmod(m, gain=1.0, weightinitfunc=xavier_uniform_):
         m.weight.data[:, :, 1::2, 1::2, 0::2] = m.weight.data[:, :, 0::2, 0::2, 0::2]
         m.weight.data[:, :, 1::2, 1::2, 1::2] = m.weight.data[:, :, 0::2, 0::2, 0::2]
 
+
 def initseq(s):
     for a, b in zip(s[:-1], s[1:]):
         if isinstance(b, nn.ReLU):
@@ -101,6 +105,7 @@ def initseq(s):
             initmod(a)
 
     initmod(s[-1])
+
 
 class Rodrigues(nn.Module):
     def __init__(self):
@@ -123,6 +128,7 @@ class Rodrigues(nn.Module):
             rvec[:, 0] * rvec[:, 2] * (1. - costh) - rvec[:, 1] * sinth,
             rvec[:, 1] * rvec[:, 2] * (1. - costh) + rvec[:, 0] * sinth,
             rvec[:, 2] ** 2 + (1. - rvec[:, 2] ** 2) * costh), dim=1).view(-1, 3, 3)
+
 
 class Quaternion(nn.Module):
     def __init__(self):
